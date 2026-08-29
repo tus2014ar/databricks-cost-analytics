@@ -78,14 +78,20 @@ Full technical write-up — every table's grain, load pattern, and design ration
 
 ## Dashboard
 
-A six-tab FinOps dashboard reads from the gold layer — Cost Summary, AI Query Cost, Object Ownership, Tagging & Attribution, an App Cost breakdown, and a README tab documenting the methodology for every metric.
+A six-tab FinOps dashboard reads from the gold layer — Cost Summary, AI Query Cost, Object Ownership, Tagging & Attribution, an App Cost breakdown, and a README tab documenting the methodology for every metric. KPI tiles from four of those tabs, cropped from the live dashboard:
 
-![Cost Summary](docs/images/dashboard-cost-summary.png)
-![AI Query Cost](docs/images/dashboard-ai-query-cost.png)
-![Object Ownership](docs/images/dashboard-object-ownership.png)
-![Tagging and Attribution](docs/images/dashboard-tagging-attribution.png)
+<table>
+<tr>
+<td><img src="docs/images/dashboard-cost-summary.png" alt="Cost Summary: Total Databricks Spend $146,006"></td>
+<td><img src="docs/images/dashboard-ai-query-cost.png" alt="AI Query Cost: Total SQL MCP Estimated Cost $630"></td>
+</tr>
+<tr>
+<td><img src="docs/images/dashboard-object-ownership.png" alt="Object Ownership: Total Objects Tracked 934"></td>
+<td><img src="docs/images/dashboard-tagging-attribution.png" alt="Tagging and Attribution: Team Tag Coverage 38.2%"></td>
+</tr>
+</table>
 
-Full SQL for all underlying dashboard queries: [`docs/dashboard-reference.md`](docs/dashboard-reference.md).
+Full tab layout (widgets, filters, and every underlying SQL query): [`docs/dashboard-reference.md`](docs/dashboard-reference.md).
 
 ## Masking notes
 
