@@ -1,0 +1,12 @@
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "W"]
+ignore = [
+    "F821",  # Databricks-injected globals (spark, dbutils, display) are undefined outside a notebook runtime
+    "E501",  # Databricks magic-comment headers routinely exceed a fixed line length
+]
+
+[tool.ruff.lint.per-file-ignores]
+"notebooks/init_libraries.py" = ["F401"]  # re-exported for other notebooks via `%run ./init_libraries`
