@@ -63,6 +63,7 @@ flowchart LR
     BILL & COMP & FLOW & ACC & SRV & QRY --> SILVER["Silver\n(9 tables, deduped + watermarked)"]
     SILVER --> GOLD["Gold star schema\n(dim_workspace, dim_sku, dim_object,\nfact_usage, query_history)"]
     GOLD --> DASH["FinOps Dashboard\n(Cost, Ownership, Tagging, AI attribution)"]
+    GOLD --> FCST["gold_spend_forecast\n(OLS trend, account + top objects)"]
 ```
 
 **Pipeline design:**
@@ -72,6 +73,7 @@ flowchart LR
 - **Deterministic surrogate keys via `xxhash64`**, not auto-increment — auto-increment would regenerate on every full-rebuild and silently break every downstream fact-table join.
 - **Partition-selective DELETE + INSERT** on the two large fact tables (`gold_fact_usage`, `gold_query_history`), because Databricks Serverless SQL Warehouses don't support Spark's native partition-overwrite mode — only the daily watermark window is touched, leaving years of historical partitions untouched.
 - **AI query cost attribution**, added as an extension: Claude queries are identified by client-application string in the dashboard layer (no derived pipeline column, so a new client string is a dashboard-only change), and cost is attributed pro-rata by `total_task_duration_ms` — the true parallel-compute measure, not wall-clock, which the methodology review found overstates Claude's real cost by roughly 23%.
+- **Spend forecasting** ([`4.0_gold_spend_forecast.py`](notebooks/4.0_gold_spend_forecast.py)), a later addition to the same pipeline: an ordinary-least-squares regression fit to the trailing 90 days of `gold_daily_spend_trend`, both account-wide and for the top cost objects by lifetime spend (skipping any object with fewer than 14 days of billing activity in the window — not enough points for a trend to mean anything). The fitted rate is annualized into a low/mid/high band using the regression's residual standard deviation, replacing the manual "compare a few rolling averages by eye" approach from the initial EDA with a repeatable, scheduled task in the same job. It supersedes, and is consistent with, the $53K–$57K range that first surfaced from that manual EDA pass.
 - **CI** ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) lints every notebook and validates both job configs against a schema — catching a broken task dependency or a missing required field before it would fail at `databricks bundle deploy` time.
 
 Full technical write-up — every table's grain, load pattern, and design rationale: [`docs/table_designs.md`](docs/table_designs.md) and [`docs/load_patterns.md`](docs/load_patterns.md).
@@ -112,4 +114,4 @@ Left out of this repo entirely: the EDA presentation deck, data dictionaries, an
 
 ## Skills demonstrated
 
-`Databricks` · `PySpark` · `SQL` · `Python` · `Databricks Asset Bundles` · `Unity Catalog` · `Star schema design` · `FinOps / cost governance` · `Data pipeline architecture (silver/gold)` · `CI/CD for data pipelines`
+`Databricks` · `PySpark` · `SQL` · `Python` · `Databricks Asset Bundles` · `Unity Catalog` · `Star schema design` · `FinOps / cost governance` · `Data pipeline architecture (silver/gold)` · `CI/CD for data pipelines` · `Statistical forecasting (OLS regression, NumPy)`
