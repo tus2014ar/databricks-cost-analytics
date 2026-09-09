@@ -7,9 +7,9 @@
 ![SQL](https://img.shields.io/badge/SQL-4479A1?style=flat&logo=postgresql&logoColor=white)
 ![YAML](https://img.shields.io/badge/YAML-CB171E?style=flat&logo=yaml&logoColor=white)
 
-**A FinOps pipeline that turned three years of scattered platform billing data into a governed cost model — and caught a 2x measurement error in an AI cost-attribution methodology before it ever reached a stakeholder.**
+**A FinOps pipeline that turned three years of scattered platform billing data into a governed cost model, forecasts future spend with a regression model, and caught a 2x measurement error in an AI cost-attribution methodology before it ever reached a stakeholder.**
 
-During a Data Engineering internship at a construction industry firm, I designed and built a Databricks cost analytics pipeline from Unity Catalog system tables — the platform's own billing, compute, and query telemetry — into a star schema powering a FinOps dashboard used by leadership and team leads. The code in [`notebooks/`](notebooks/) — including the Databricks Asset Bundle job configs — is the real implementation, with identifying details masked or genericized — see [Masking notes](#masking-notes).
+During a Data Science internship at a construction industry firm, I designed and built a Databricks cost analytics pipeline from Unity Catalog system tables — the platform's own billing, compute, and query telemetry — into a star schema powering a FinOps dashboard used by leadership and team leads, plus an automated spend-forecasting layer on top of it. The code in [`notebooks/`](notebooks/) — including the Databricks Asset Bundle job configs — is the real implementation, with identifying details masked or genericized — see [Masking notes](#masking-notes).
 
 <div align="center">
 
@@ -29,6 +29,7 @@ During a Data Engineering internship at a construction industry firm, I designed
 - Extended the pipeline to attribute AI assistant (Claude) query cost by pro-rata compute-time share, validating **$462 in attributed cost** over a 4-month window — and **caught a 2x measurement error during methodology review**: an earlier monthly-grain calculation would have reported **$904**, nearly double the correct figure, caught and fixed before it was ever presented as fact.
 - Designed the ownership and tag-coverage model as the pipeline's core FinOps KPI, not an afterthought — team tag coverage sat at just **38.2%** and purpose tag coverage at **12.1%** at time of measurement, both now tracked continuously as spend-weighted percentages so cost accountability gaps can't silently regrow.
 - Handled real production scale cleanly: **268,000+ billing records and 1.85M+ query executions**, both confirmed 100% unique with zero duplicates after load — validated by an idempotency check that reruns the pipeline and confirms zero row drift.
+- Automated the spend forecast itself: a trailing-90-day OLS regression, run both account-wide and per top-cost object, replacing a one-time manual EDA pass (7-day vs. 30-day vs. full-history rate comparison, projecting **$53K–$57K annualized**) with a repeatable, scheduled task in the same pipeline.
 
 ### Before / after
 
@@ -40,6 +41,7 @@ During a Data Engineering internship at a construction industry firm, I designed
 | **AI cost attribution** | Not measured | Pro-rata attribution by compute-time share; $462 validated, a $904 methodology error caught before reporting |
 | **Tag governance** | Tagging compliance unmeasured | Team (38.2%) and purpose (12.1%) tag coverage tracked as a spend-weighted %, with an untagged-spend drill-down |
 | **Data quality confidence** | Raw system tables re-deliver full config history on every extract (stale re-delivery) | Deduplicated via `ROW_NUMBER()` + `change_timestamp`, validated with a post-load uniqueness check on every run |
+| **Spend forecasting** | Manual, one-time EDA pass comparing rolling averages by eye | Scheduled OLS regression, account-wide and per top-cost object, with a residual-based confidence band |
 
 ## Problem
 
