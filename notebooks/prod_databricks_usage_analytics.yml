@@ -4,7 +4,7 @@ resources:
       name: prod_databricks_usage_analytics
       description: Databricks Cost Analytics pipeline. Reads from Databricks system
         tables (billing, compute, lakeflow, access, serving), builds 8 silver
-        tables and 4 gold tables + 2 views in
+        tables, 4 gold tables, 2 views, and a spend forecast table in
         data_automation.databricks_analytics.
       tasks:
         - task_key: table_setup_check
@@ -36,6 +36,12 @@ resources:
             notebook_path: domains/data_automation/databricks_analytics/notebooks/3.0_gold_databricks_analytics
             source: GIT
             warehouse_id: <WAREHOUSE_ID>
+        - task_key: gold_spend_forecast
+          depends_on:
+            - task_key: gold_databricks_analytics
+          notebook_task:
+            notebook_path: domains/data_automation/databricks_analytics/notebooks/4.0_gold_spend_forecast
+            source: GIT
       git_source:
         git_url: https://github.com/your-org/your-pipelines-repo
         git_provider: gitHub
