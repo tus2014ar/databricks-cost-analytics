@@ -13,7 +13,11 @@
 # MAGIC **Method:** ordinary least squares on `daily_cost` vs. day-index over the trailing
 # MAGIC window (default 90 days, configurable via widget). The fitted line's value at the most
 # MAGIC recent day is annualized (`× 365`) for the midpoint; the regression's residual standard
-# MAGIC error gives a ±1 std-dev band around it. Objects with fewer than `min_days_history` days
+# MAGIC error gives a ±1 std-dev band around it. Forecast quality is scored per row: in-sample
+# MAGIC `r_squared`, plus a holdout backtest (fit on the first ~5/6 of the window, score the
+# MAGIC extrapolation on the rest) giving `backtest_wape` vs. a naive flat-mean `naive_wape`
+# MAGIC and `band_coverage` (share of holdout days inside the ±1σ band; ~0.68 if calibrated).
+# MAGIC Backtest metrics are NULL when the window has fewer than 30 days. Objects with fewer than `min_days_history` days
 # MAGIC of billing activity in the window are skipped — a trend fit on a handful of points isn't
 # MAGIC a trend, it's noise.
 
@@ -44,7 +48,8 @@ verbose          = dbutils.widgets.get("verbose").strip().lower() == "true"
 trailing_days    = int(dbutils.widgets.get("trailing_days"))
 min_days_history = int(dbutils.widgets.get("min_days_history"))
 top_n_objects    = int(dbutils.widgets.get("top_n_objects"))
-prefix           = "dev_" if environment == "dev" else ""
+BACKTEST_MIN_DAYS = 30   # below this the series is too short to split into train/holdout
+prefix          = "dev_" if environment == "dev" else ""
 
 CATALOG = "data_automation"
 SCHEMA  = "databricks_analytics"
@@ -96,14 +101,56 @@ def fit_trend(daily_costs: np.ndarray) -> dict:
     annual_mid = latest_fitted_rate * 365
     annual_band = residual_std * 365
 
+    # R^2: share of daily variance the trend line explains.
+    ss_res = float(np.sum((daily_costs - fitted) ** 2))
+    ss_tot = float(np.sum((daily_costs - daily_costs.mean()) ** 2))
+    r2 = 1 - ss_res / ss_tot if ss_tot > 0 else 0.0
+
+    backtest = _backtest(daily_costs)
+
     return {
         "n_days_used": n,
         "daily_rate_fitted": latest_fitted_rate,
         "trend_slope_daily": float(slope),
         "residual_std_daily": residual_std,
+        "r_squared": r2,
+        **backtest,
         "projected_annual_low": max(0.0, annual_mid - annual_band),
         "projected_annual_mid": max(0.0, annual_mid),
         "projected_annual_high": max(0.0, annual_mid + annual_band),
+    }
+
+
+def _backtest(daily_costs: np.ndarray, min_days: int = BACKTEST_MIN_DAYS) -> dict:
+    """
+    Hold out the last ~1/6 of the window (at least 7 days), fit OLS on the rest, and
+    score the extrapolated line against what actually happened. Compared with a naive
+    baseline (flat mean of the last 30 training days). Error is WAPE
+    (sum|err| / sum(actual)) rather than MAPE so zero-spend days don't blow it up.
+    Band coverage is the share of holdout days within +/- 1 training residual std.
+    Returns None metrics when the series is too short to split.
+    """
+    n = len(daily_costs)
+    empty = {"backtest_wape": None, "naive_wape": None, "band_coverage": None, "backtest_holdout_days": 0}
+    if n < min_days:
+        return empty
+
+    h = max(7, n // 6)
+    train, test = daily_costs[:-h], daily_costs[-h:]
+    total_actual = float(np.sum(test))
+    if total_actual <= 0:
+        return empty
+
+    s, b = np.polyfit(np.arange(len(train)), train, deg=1)
+    train_resid_std = float(np.std(train - (s * np.arange(len(train)) + b)))
+    pred = s * np.arange(len(train), n) + b
+    naive = np.full(h, train[-30:].mean())
+
+    return {
+        "backtest_wape": float(np.sum(np.abs(test - pred)) / total_actual),
+        "naive_wape": float(np.sum(np.abs(test - naive)) / total_actual),
+        "band_coverage": float(np.mean(np.abs(test - pred) <= train_resid_std)),
+        "backtest_holdout_days": h,
     }
 
 # COMMAND ----------
@@ -132,7 +179,9 @@ if len(account_trend_df) >= min_days_history:
     })
     if verbose:
         print(f"ACCOUNT: fitted daily rate ${fit['daily_rate_fitted']:.2f}, "
-              f"projected annual ${fit['projected_annual_low']:.0f}-${fit['projected_annual_high']:.0f}")
+              f"projected annual ${fit['projected_annual_low']:.0f}-${fit['projected_annual_high']:.0f}, "
+              f"R2={fit['r_squared']:.2f}, backtest WAPE={fit['backtest_wape']}, "
+              f"naive WAPE={fit['naive_wape']}, band coverage={fit['band_coverage']}")
 else:
     print(f"WARNING: only {len(account_trend_df)} days of account-wide history "
           f"(< min_days_history={min_days_history}) — skipping account forecast.")
@@ -206,7 +255,12 @@ computed_schema = T.StructType([
     T.StructField("daily_rate_fitted",      T.DoubleType(), False),
     T.StructField("trend_slope_daily",      T.DoubleType(), False),
     T.StructField("residual_std_daily",     T.DoubleType(), False),
-    T.StructField("projected_annual_low",   T.DoubleType(), False),
+    T.StructField("r_squared",              T.DoubleType(), False),
+    T.StructField("backtest_wape",          T.DoubleType(), True),
+    T.StructField("naive_wape",             T.DoubleType(), True),
+    T.StructField("band_coverage",          T.DoubleType(), True),
+    T.StructField("backtest_holdout_days",  T.IntegerType(),False),
+    T.StructField("projected_annual_low",  T.DoubleType(), False),
     T.StructField("projected_annual_mid",   T.DoubleType(), False),
     T.StructField("projected_annual_high",  T.DoubleType(), False),
 ])
@@ -215,6 +269,7 @@ computed_schema = T.StructType([
 FORECAST_COLUMNS = [
     "forecast_sk", "scope", "object_sk", "object_identifier", "n_days_used",
     "daily_rate_fitted", "trend_slope_daily", "residual_std_daily",
+    "r_squared", "backtest_wape", "naive_wape", "band_coverage", "backtest_holdout_days",
     "projected_annual_low", "projected_annual_mid", "projected_annual_high",
     "method", "forecast_run_date",
 ]
@@ -233,7 +288,7 @@ if all_rows:
         ) \
         .select(FORECAST_COLUMNS)
 
-    forecast_df.write.mode("overwrite").saveAsTable(f"{target_catalog}.{SCHEMA}.gold_spend_forecast")
+    forecast_df.write.mode("overwrite").option("overwriteSchema", "true").saveAsTable(f"{target_catalog}.{SCHEMA}.gold_spend_forecast")
 
     print(f"Wrote {forecast_df.count()} row(s) to {target_catalog}.{SCHEMA}.gold_spend_forecast")
     if verbose:
